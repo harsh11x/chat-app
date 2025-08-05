@@ -9,25 +9,6 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 require('dotenv').config();
 
-// Import routes
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/users');
-const chatRoutes = require('./routes/chats');
-const messageRoutes = require('./routes/messages');
-const groupRoutes = require('./routes/groups');
-const storyRoutes = require('./routes/stories');
-const callRoutes = require('./routes/calls');
-
-// Import socket handlers
-const socketAuth = require('./socket/auth');
-const socketChat = require('./socket/chat');
-const socketCall = require('./socket/call');
-const socketStatus = require('./socket/status');
-
-// Import middleware
-const authMiddleware = require('./middleware/auth');
-const errorHandler = require('./middleware/errorHandler');
-
 const app = express();
 const server = http.createServer(app);
 
@@ -49,13 +30,16 @@ app.use(compression());
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  message: {
+    success: false,
+    message: 'Too many requests from this IP, please try again later.'
+  }
 });
 app.use('/api/', limiter);
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: process.env.CORS_ORIGIN || '*',
   credentials: true
 }));
 
@@ -64,15 +48,26 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Logging
-app.use(morgan('combined'));
+if (process.env.NODE_ENV !== 'test') {
+  app.use(morgan('combined'));
+}
 
 // MongoDB connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/chatapp', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('✅ MongoDB connected successfully'))
-.catch(err => console.error('❌ MongoDB connection error:', err));
+const connectDB = async () => {
+  try {
+    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/chatapp', {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log(`✅ MongoDB connected: ${conn.connection.host}`);
+  } catch (error) {
+    console.error('❌ MongoDB connection error:', error);
+    process.exit(1);
+  }
+};
+
+// Connect to database
+connectDB();
 
 // Make io accessible to routes
 app.use((req, res, next) => {
@@ -80,46 +75,75 @@ app.use((req, res, next) => {
   next();
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/users', authMiddleware, userRoutes);
-app.use('/api/chats', authMiddleware, chatRoutes);
-app.use('/api/messages', authMiddleware, messageRoutes);
-app.use('/api/groups', authMiddleware, groupRoutes);
-app.use('/api/stories', authMiddleware, storyRoutes);
-app.use('/api/calls', authMiddleware, callRoutes);
+// Import routes (with error handling)
+let authRoutes, userRoutes, chatRoutes, messageRoutes, groupRoutes, storyRoutes, callRoutes;
+let authMiddleware, errorHandler;
+let socketAuth, socketChat, socketCall, socketStatus;
 
-// Health check endpoint
+try {
+  authRoutes = require('./routes/auth');
+  userRoutes = require('./routes/users');
+  chatRoutes = require('./routes/chats');
+  messageRoutes = require('./routes/messages');
+  groupRoutes = require('./routes/groups');
+  storyRoutes = require('./routes/stories');
+  callRoutes = require('./routes/calls');
+  
+  authMiddleware = require('./middleware/auth');
+  errorHandler = require('./middleware/errorHandler');
+  
+  socketAuth = require('./socket/auth');
+  socketChat = require('./socket/chat');
+  socketCall = require('./socket/call');
+  socketStatus = require('./socket/status');
+  
+  console.log('✅ All modules loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading modules:', error.message);
+}
+
+// Health check endpoint (before auth middleware)
 app.get('/health', (req, res) => {
   res.status(200).json({
-    status: 'OK',
+    success: true,
+    message: 'ChatApp Backend is running!',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    server: '3.111.208.77:3000'
   });
 });
+
+// API Routes
+if (authRoutes) app.use('/api/auth', authRoutes);
+if (userRoutes && authMiddleware) app.use('/api/users', authMiddleware, userRoutes);
+if (chatRoutes && authMiddleware) app.use('/api/chats', authMiddleware, chatRoutes);
+if (messageRoutes && authMiddleware) app.use('/api/messages', authMiddleware, messageRoutes);
+if (groupRoutes && authMiddleware) app.use('/api/groups', authMiddleware, groupRoutes);
+if (storyRoutes && authMiddleware) app.use('/api/stories', authMiddleware, storyRoutes);
+if (callRoutes && authMiddleware) app.use('/api/calls', authMiddleware, callRoutes);
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log(`🔌 User connected: ${socket.id}`);
 
-  // Authentication
-  socketAuth(io, socket);
-  
-  // Chat functionality
-  socketChat(io, socket);
-  
-  // Call functionality
-  socketCall(io, socket);
-  
-  // User status
-  socketStatus(io, socket);
+  // Socket handlers (with error handling)
+  try {
+    if (socketAuth) socketAuth(io, socket);
+    if (socketChat) socketChat(io, socket);
+    if (socketCall) socketCall(io, socket);
+    if (socketStatus) socketStatus(io, socket);
+  } catch (error) {
+    console.error('Socket handler error:', error);
+  }
 
   // Handle disconnection
   socket.on('disconnect', (reason) => {
     console.log(`🔌 User disconnected: ${socket.id}, Reason: ${reason}`);
     // Update user status to offline
-    socket.broadcast.emit('user_offline', { userId: socket.userId });
+    if (socket.userId) {
+      socket.broadcast.emit('user_offline', { userId: socket.userId });
+    }
   });
 
   // Handle errors
@@ -129,23 +153,38 @@ io.on('connection', (socket) => {
 });
 
 // Error handling middleware
-app.use(errorHandler);
+if (errorHandler) {
+  app.use(errorHandler);
+}
 
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
-    message: 'Route not found'
+    message: 'Route not found',
+    availableRoutes: [
+      'GET /health',
+      'POST /api/auth/send-otp',
+      'POST /api/auth/verify-otp',
+      'GET /api/users/profile',
+      'GET /api/chats',
+      'GET /api/calls/history'
+    ]
   });
 });
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`
 🚀 ChatApp Backend Server Started!
-📡 Server running on port ${PORT}
-🌐 Environment: ${process.env.NODE_ENV || 'development'}
+📡 Server running on ${HOST}:${PORT}
+🌐 Public URL: http://3.111.208.77:${PORT}
+🔗 Health Check: http://3.111.208.77:${PORT}/health
+📱 API Base: http://3.111.208.77:${PORT}/api
+🔌 Socket.IO: http://3.111.208.77:${PORT}
+🌍 Environment: ${process.env.NODE_ENV || 'development'}
 📊 Socket.IO enabled for real-time communication
 🔒 Security middleware active
 📱 Ready for Flutter app connections!
@@ -159,6 +198,25 @@ process.on('SIGTERM', () => {
     console.log('Process terminated');
     mongoose.connection.close();
   });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  server.close(() => {
+    console.log('Process terminated');
+    mongoose.connection.close();
+  });
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
+  process.exit(1);
 });
 
 module.exports = { app, server, io };
