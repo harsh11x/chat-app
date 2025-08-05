@@ -1,0 +1,19 @@
+{
+  "name": "chatapp-backend-minimal",
+  "version": "1.0.0",
+  "description": "Minimal ChatApp backend for testing",
+  "main": "server-minimal.js",
+  "scripts": {
+    "start": "node server-minimal.js",
+    "dev": "nodemon server-minimal.js",
+    "test": "node server-minimal.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
