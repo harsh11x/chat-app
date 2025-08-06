@@ -86,10 +86,8 @@ if (process.env.NODE_ENV !== 'test') {
 // MongoDB connection
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/chatapp_complete', {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    // Mongoose 8.x doesn't need useNewUrlParser and useUnifiedTopology
+    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/chatapp_complete');
     console.log(`✅ MongoDB connected: ${conn.connection.host}`);
   } catch (error) {
     console.error('❌ MongoDB connection error:', error);

@@ -1,10 +1,20 @@
 const twilio = require('twilio');
 
-// Initialize Twilio client
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+// Initialize Twilio client with error handling
+let client = null;
+try {
+  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    client = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+    console.log('✅ Twilio client initialized');
+  } else {
+    console.log('⚠️ Twilio credentials not provided - SMS features will be disabled');
+  }
+} catch (error) {
+  console.error('❌ Failed to initialize Twilio client:', error.message);
+}
 
 /**
  * Send OTP via SMS using Twilio
@@ -14,8 +24,8 @@ const client = twilio(
  */
 const sendOTP = async (phoneNumber, otp) => {
   try {
-    // In development, log OTP instead of sending SMS
-    if (process.env.NODE_ENV === 'development') {
+    // In development or when Twilio is not configured, log OTP instead of sending SMS
+    if (process.env.NODE_ENV === 'development' || !client) {
       console.log(`📱 OTP for ${phoneNumber}: ${otp}`);
       return true;
     }
@@ -50,7 +60,7 @@ const sendOTP = async (phoneNumber, otp) => {
  */
 const sendWhatsAppOTP = async (phoneNumber, otp) => {
   try {
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV === 'development' || !client) {
       console.log(`📱 WhatsApp OTP for ${phoneNumber}: ${otp}`);
       return true;
     }
